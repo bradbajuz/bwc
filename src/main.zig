@@ -37,7 +37,6 @@ fn analyze(contents: []const u8, name: []const u8) !FileResult {
 
     for (contents) |byte| {
         if (byte == '\n') {
-            max_len = @max(max_len, current_len);
             current_len = 0;
         } else {
             current_len += 1;
@@ -245,4 +244,29 @@ pub fn main(init: std.process.Init) !void {
     }
     try writer.interface.flush();
     if (had_error) std.process.exit(1);
+}
+
+test "max line length" {
+    const result = try analyze("ab\n", "");
+    try std.testing.expectEqual(2, result.len);
+}
+
+test "max line length: trailing newline" {
+    const result = try analyze("a\nbb\n", "");
+    try std.testing.expectEqual(2, result.len);
+}
+
+test "max line length: no trailing newline" {
+    const result = try analyze("a\nbb", "");
+    try std.testing.expectEqual(2, result.len);
+}
+
+test "max line length: empty input" {
+    const result = try analyze("", "");
+    try std.testing.expectEqual(0, result.len);
+}
+
+test "max line length: just a newline" {
+    const result = try analyze("\n", "");
+    try std.testing.expectEqual(0, result.len);
 }

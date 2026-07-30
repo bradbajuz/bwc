@@ -5,7 +5,7 @@ const FileResult = struct {
     words: usize,
     bytes: usize,
     chars: usize,
-    len: usize,
+    max_line_len: usize,
     name: []const u8,
 };
 
@@ -53,7 +53,7 @@ fn analyze(contents: []const u8, name: []const u8) !FileResult {
         .words = word_count,
         .bytes = contents.len,
         .chars = char_count,
-        .len = max_len,
+        .max_line_len = max_len,
     };
 }
 
@@ -71,7 +71,7 @@ pub fn main(init: std.process.Init) !void {
     var total_words: usize = 0;
     var total_bytes: usize = 0;
     var total_chars: usize = 0;
-    var total_len: usize = 0;
+    var total_max_line_len: usize = 0;
     var show_lines: bool = false;
     var show_words: bool = false;
     var show_bytes: bool = false;
@@ -121,7 +121,7 @@ pub fn main(init: std.process.Init) !void {
         total_words += result.words;
         total_bytes += result.bytes;
         total_chars += result.chars;
-        total_len = @max(result.len, total_len);
+        total_max_line_len = @max(result.max_line_len, total_max_line_len);
 
         try results.append(arena, result);
     } else {
@@ -132,7 +132,7 @@ pub fn main(init: std.process.Init) !void {
                     error.PermissionDenied, error.AccessDenied => std.debug.print("bwc: {s}: Permission denied\n", .{filename}),
                     error.IsDir => {
                         std.debug.print("bwc: {s}: Is a directory\n", .{filename});
-                        try results.append(arena, FileResult{ .lines = 0, .words = 0, .bytes = 0, .chars = 0, .len = 0, .name = filename });
+                        try results.append(arena, FileResult{ .lines = 0, .words = 0, .bytes = 0, .chars = 0, .max_line_len = 0, .name = filename });
                     },
                     else => std.debug.print("bwc: {s}: {s}\n", .{ filename, @errorName(err) }),
                 }
@@ -150,7 +150,7 @@ pub fn main(init: std.process.Init) !void {
             total_words += result.words;
             total_bytes += result.bytes;
             total_chars += result.chars;
-            total_len = @max(result.len, total_len);
+            total_max_line_len = @max(result.max_line_len, total_max_line_len);
 
             try results.append(arena, result);
         }
@@ -198,7 +198,7 @@ pub fn main(init: std.process.Init) !void {
 
         if (show_len) {
             if (printed_column) try writer.interface.print(" ", .{});
-            try writer.interface.print("{d:[1]}", .{ item.len, width });
+            try writer.interface.print("{d:[1]}", .{ item.max_line_len, width });
             printed_column = true;
         }
 
@@ -236,7 +236,7 @@ pub fn main(init: std.process.Init) !void {
 
         if (show_len) {
             if (printed_column) try writer.interface.print(" ", .{});
-            try writer.interface.print("{d:[1]}", .{ total_len, width });
+            try writer.interface.print("{d:[1]}", .{ total_max_line_len, width });
             printed_column = true;
         }
 
@@ -248,25 +248,25 @@ pub fn main(init: std.process.Init) !void {
 
 test "max line length" {
     const result = try analyze("ab\n", "");
-    try std.testing.expectEqual(2, result.len);
+    try std.testing.expectEqual(2, result.max_line_len);
 }
 
 test "max line length: trailing newline" {
     const result = try analyze("a\nbb\n", "");
-    try std.testing.expectEqual(2, result.len);
+    try std.testing.expectEqual(2, result.max_line_len);
 }
 
 test "max line length: no trailing newline" {
     const result = try analyze("a\nbb", "");
-    try std.testing.expectEqual(2, result.len);
+    try std.testing.expectEqual(2, result.max_line_len);
 }
 
 test "max line length: empty input" {
     const result = try analyze("", "");
-    try std.testing.expectEqual(0, result.len);
+    try std.testing.expectEqual(0, result.max_line_len);
 }
 
 test "max line length: just a newline" {
     const result = try analyze("\n", "");
-    try std.testing.expectEqual(0, result.len);
+    try std.testing.expectEqual(0, result.max_line_len);
 }

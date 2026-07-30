@@ -6,10 +6,10 @@ const FileResult = struct {
     bytes: usize,
     chars: usize,
     max_line_len: usize,
-    name: []const u8,
+    path: []const u8, // filename; empty when reading from stdin
 };
 
-fn analyze(contents: []const u8, name: []const u8) !FileResult {
+fn analyze(contents: []const u8, path: []const u8) !FileResult {
     // wc -l
     var line_count: usize = 0;
     for (contents) |byte| {
@@ -48,7 +48,7 @@ fn analyze(contents: []const u8, name: []const u8) !FileResult {
     const char_count = try std.unicode.utf8CountCodepoints(contents);
 
     return FileResult{
-        .name = name,
+        .path = path,
         .lines = line_count,
         .words = word_count,
         .bytes = contents.len,
@@ -132,7 +132,7 @@ pub fn main(init: std.process.Init) !void {
                     error.PermissionDenied, error.AccessDenied => std.debug.print("bwc: {s}: Permission denied\n", .{filename}),
                     error.IsDir => {
                         std.debug.print("bwc: {s}: Is a directory\n", .{filename});
-                        try results.append(arena, FileResult{ .lines = 0, .words = 0, .bytes = 0, .chars = 0, .max_line_len = 0, .name = filename });
+                        try results.append(arena, FileResult{ .lines = 0, .words = 0, .bytes = 0, .chars = 0, .max_line_len = 0, .path = filename });
                     },
                     else => std.debug.print("bwc: {s}: {s}\n", .{ filename, @errorName(err) }),
                 }
@@ -202,7 +202,7 @@ pub fn main(init: std.process.Init) !void {
             printed_column = true;
         }
 
-        if (item.name.len > 0) try writer.interface.print(" {s}", .{item.name});
+        if (item.path.len > 0) try writer.interface.print(" {s}", .{item.path});
         try writer.interface.print("\n", .{});
     }
 

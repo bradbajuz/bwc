@@ -23,6 +23,11 @@ With no FILE, or when FILE is not given, reads standard input.
 
 With no options, defaults to `-l -w -c`.
 
+## Compatibility notes
+
+- `-m` counts decodable UTF-8 characters and silently skips undecodable
+  bytes, matching GNU `wc` behavior under a UTF-8 locale.
+
 ## Building
 
 Requires Zig 0.16.0 or newer.

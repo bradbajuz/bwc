@@ -9,7 +9,7 @@ const FileResult = struct {
     path: []const u8, // filename; empty when reading from stdin
 };
 
-fn analyze(contents: []const u8, path: []const u8) !FileResult {
+fn analyze(contents: []const u8, path: []const u8) FileResult {
     // wc -l
     var line_count: usize = 0;
     for (contents) |byte| {
@@ -45,7 +45,24 @@ fn analyze(contents: []const u8, path: []const u8) !FileResult {
     }
 
     // wc -m
-    const char_count = try std.unicode.utf8CountCodepoints(contents);
+    var i: usize = 0;
+    var char_count: usize = 0;
+    while (i < contents.len) {
+        const n = std.unicode.utf8ByteSequenceLength(contents[i]) catch {
+            i += 1;
+            continue; // invalid lead byte: skip, don't count
+        };
+        if (i + n > contents.len) {
+            i += 1;
+            continue; // truncated final sequence: skip, don't count
+        }
+        _ = std.unicode.utf8Decode(contents[i..][0..n]) catch {
+            i += 1;
+            continue; // valid lead, bad continuation ("\xc3\x28")
+        };
+        char_count += 1;
+        i += n;
+    }
 
     return FileResult{
         .path = path,
@@ -115,7 +132,7 @@ pub fn main(init: std.process.Init) !void {
         var file_reader = std.Io.File.reader(file, init.io, &buf);
         const contents = try std.Io.Reader.allocRemaining(&file_reader.interface, arena, .unlimited);
 
-        const result = try analyze(contents, "");
+        const result = analyze(contents, "");
 
         total_lines += result.lines;
         total_words += result.words;
@@ -144,7 +161,7 @@ pub fn main(init: std.process.Init) !void {
             var file_reader = std.Io.File.reader(file, init.io, &buf);
             const contents = try std.Io.Reader.allocRemaining(&file_reader.interface, arena, .unlimited);
 
-            const result = try analyze(contents, filename);
+            const result = analyze(contents, filename);
 
             total_lines += result.lines;
             total_words += result.words;
@@ -247,26 +264,51 @@ pub fn main(init: std.process.Init) !void {
 }
 
 test "max line length" {
-    const result = try analyze("ab\n", "");
+    const result = analyze("ab\n", "");
     try std.testing.expectEqual(2, result.max_line_len);
 }
 
 test "max line length: trailing newline" {
-    const result = try analyze("a\nbb\n", "");
+    const result = analyze("a\nbb\n", "");
     try std.testing.expectEqual(2, result.max_line_len);
 }
 
 test "max line length: no trailing newline" {
-    const result = try analyze("a\nbb", "");
+    const result = analyze("a\nbb", "");
     try std.testing.expectEqual(2, result.max_line_len);
 }
 
 test "max line length: empty input" {
-    const result = try analyze("", "");
+    const result = analyze("", "");
     try std.testing.expectEqual(0, result.max_line_len);
 }
 
 test "max line length: just a newline" {
-    const result = try analyze("\n", "");
+    const result = analyze("\n", "");
     try std.testing.expectEqual(0, result.max_line_len);
+}
+
+test "char count: invalid bytes are skipped" {
+    const result = analyze("\xff\xfe hello", "");
+    try std.testing.expectEqual(6, result.chars);
+}
+
+test "char count: multibyte characters" {
+    const result = analyze("héllo", "");
+    try std.testing.expectEqual(5, result.chars);
+}
+
+test "char count: valid lead byte with invalid continuation" {
+    const result = analyze("\xc3\x28", "");
+    try std.testing.expectEqual(1, result.chars);
+}
+
+test "char count: truncated sequence at end of input" {
+    const result = analyze("\xc3", "");
+    try std.testing.expectEqual(0, result.chars);
+}
+
+test "char count: empty input" {
+    const result = analyze("", "");
+    try std.testing.expectEqual(0, result.chars);
 }

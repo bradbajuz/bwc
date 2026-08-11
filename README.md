@@ -39,7 +39,7 @@ zig build
 The binary lands in `zig-out/bin/bwc`:
 
 ```
-./zig-out/bin/bwc -l foobar.txt
+./zig-out/bin/bwc -l testdir/foobar.txt
 ```
 
 ## Status

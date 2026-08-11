@@ -1,3 +1,4 @@
 .zig-cache/
 zig-out/
+testdir/noperm.txt
 .*/

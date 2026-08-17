@@ -312,3 +312,14 @@ test "char count: empty input" {
     const result = analyze("", "");
     try std.testing.expectEqual(0, result.chars);
 }
+
+test "all counters: multibyte input" {
+    const result = analyze("héllo wörld\n", "");
+    try std.testing.expectEqual(1, result.lines);
+    try std.testing.expectEqual(2, result.words);
+    try std.testing.expectEqual(14, result.bytes);
+    try std.testing.expectEqual(12, result.chars);
+    // item 8: -L counts bytes, not display width. wc -L says 11.
+    // This expectation flips to 11 when item 8 is fixed.
+    try std.testing.expectEqual(13, result.max_line_len);
+}

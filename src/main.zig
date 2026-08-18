@@ -226,17 +226,20 @@ pub fn main(init: std.process.Init) !void {
         }
     }
 
-    // determine width for formatting; total_chars can never be larger than total_bytes
-    var max_val = @max(total_lines, total_words, total_bytes);
+    const selected = @as(usize, @intFromBool(flags.lines)) + @intFromBool(flags.words) +
+        @intFromBool(flags.chars) + @intFromBool(flags.bytes) + @intFromBool(flags.len);
+
     var width: usize = 1;
-
-    while (max_val >= 10) {
-        max_val /= 10;
-        width += 1;
-    }
-
-    if (filenames.items.len == 0) {
-        width = @max(width, 7);
+    if (selected > 1 or filenames.items.len > 1) {
+        // determine width for formatting; total_chars can never be larger than total_bytes
+        var max_val = @max(total_lines, total_words, total_bytes);
+        while (max_val >= 10) {
+            max_val /= 10;
+            width += 1;
+        }
+        if (filenames.items.len == 0) {
+            width = @max(width, 7);
+        }
     }
 
     for (results.items) |item| {

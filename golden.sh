@@ -16,19 +16,13 @@ chmod 000 testdir/noperm.txt
 
 # --- expected divergences (see CHECKLIST.md) ---
 # item 8: -L counts bytes, wc counts display width
-# item 9: single-counter padding (bwc pads, wc doesn't)
 # item 10: -w counts undecodable bytes as word chars
 # item 11: directory arg -> wc falls back to width 7
 expected_diffs=(
-    # item 9: single-counter padding
-    "file -l dingus.txt" "file -w dingus.txt" "file -L dingus.txt"
-    "file -l foobar.txt"
-    "file -l utf8test.txt" "file -w utf8test.txt"
-    "stdin -l: plain" "stdin -m: bad" "stdin -l: empty"
     # item 8: -L counts bytes, not display width
     "file -L utf8test.txt" "file -l -w -c -m -L utf8test.txt" "stdin all: utf8"
     "file -L bad.bin" "file -l -w -c -m -L bad.bin"
-    "stdin -L: utf8" # also item 9 padding
+    "stdin -L: utf8"
     # item 10: -w counts undecodable bytes as word chars
     "file -w bad.bin" "file no-flags bad.bin" "file -l -w bad.bin"
     "stdin -w: bad" "stdin no-flags: bad"

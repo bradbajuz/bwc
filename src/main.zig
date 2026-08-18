@@ -1,5 +1,7 @@
 const std = @import("std");
 
+// ------------------------------ types ------------------------------
+
 const FileResult = struct {
     lines: usize,
     words: usize,
@@ -17,6 +19,10 @@ const Flags = struct {
     len: bool = false,
 };
 
+// ------------------------------ logic ------------------------------
+
+/// Count all five wc metrics of `contents`. Infallible: undecodable
+/// bytes are skipped, not errors (see checklist items 3, 10).
 fn analyze(contents: []const u8, path: []const u8) FileResult {
     // wc -l
     var line_count: usize = 0;
@@ -82,6 +88,8 @@ fn analyze(contents: []const u8, path: []const u8) FileResult {
     };
 }
 
+/// Print one row of counters, right-aligned to `width`, with the
+/// path label when present ("total" is just another path).
 fn printRow(w: *std.Io.Writer, result: FileResult, width: usize, flags: Flags) !void {
     // track column printing
     var printed_column = false;
@@ -120,6 +128,9 @@ fn printRow(w: *std.Io.Writer, result: FileResult, width: usize, flags: Flags) !
     try w.print("\n", .{});
 }
 
+/// wc clone: count lines, words, bytes, chars, and max line length for
+/// each file (or stdin when no files are given), print one row per input
+/// plus a total row for multiple files. Exits 1 if any file errored.
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
@@ -246,6 +257,8 @@ pub fn main(init: std.process.Init) !void {
     try writer.interface.flush();
     if (had_error) std.process.exit(1);
 }
+
+// ------------------------------ tests ------------------------------
 
 test "max line length" {
     const result = analyze("ab\n", "");

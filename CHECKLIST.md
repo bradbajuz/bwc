@@ -6,7 +6,7 @@ Working through these in order. For each: I attempt the fix, then get it reviewe
 - [x] 2. `defer` in the file loop "fd leak" (`src/main.zig:143`) — INVESTIGATED: not a bug. Zig `defer` is block-scoped and a loop body is a block, so the close fires per iteration. Proven experimentally: 100 files under `ulimit -n 64`, no errors. (Claim originated from Go's function-scoped defer; doesn't apply to Zig.)
 - [x] 3. Invalid UTF-8 crashed `-m` — fixed: count decodable codepoints, skip undecodable bytes (matches GNU `wc -m`, verified against oracle). Bonus: `analyze` no longer fallible, error union removed.
 - [x] 4. Golden-test harness — `golden.sh`: differential vs GNU wc (oracle). 59 cases: fixtures×flagsets matrix, multi-file, error paths, stdin. PASS/DIFF/XFAIL/XPASS verdicts; `expected_diffs` (21 entries) records catalogued divergences (items 8–11). XPASS is a failure (stale entry signal). Exit 0 only when fail=0 and xpass=0. Found items 10 & 11 during construction.
-- [ ] 5. Fuse the three counting passes into one loop (`analyze`)
+- [x] 5. Fused the three byte-wise counting passes (lines/words/max-line) into one loop in `analyze`; char loop stays separate (variable-width, skip-on-error). Verified as pure refactor: 11/11 unit tests + golden.sh 38/21 unchanged.
 - [ ] 6. De-duplicate the print blocks (`src/main.zig:173-245`)
 - [ ] 7. Streaming architecture — constant memory, chunk-boundary state
 - [ ] 8. `-L` should count characters, not bytes (found via `wc -L utf8test.txt`: 11 vs 13)

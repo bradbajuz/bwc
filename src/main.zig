@@ -12,30 +12,30 @@ const FileResult = struct {
 fn analyze(contents: []const u8, path: []const u8) FileResult {
     // wc -l
     var line_count: usize = 0;
-    for (contents) |byte| {
-        if (byte == '\n') {
-            line_count += 1;
-        }
-    }
 
     // wc -w
     var word_count: usize = 0;
     var in_word: bool = false;
-
-    for (contents) |byte| {
-        if (std.ascii.isWhitespace(byte)) {
-            in_word = false;
-        } else if (!in_word) {
-            word_count += 1;
-            in_word = true;
-        }
-    }
 
     // wc -L
     var current_len: usize = 0;
     var max_len: usize = 0;
 
     for (contents) |byte| {
+        // lines: wc -l
+        if (byte == '\n') {
+            line_count += 1;
+        }
+
+        // words: wc -w
+        if (std.ascii.isWhitespace(byte)) {
+            in_word = false;
+        } else if (!in_word) {
+            word_count += 1;
+            in_word = true;
+        }
+
+        // max line: wc -L
         if (byte == '\n') {
             current_len = 0;
         } else {

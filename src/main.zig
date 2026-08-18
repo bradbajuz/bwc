@@ -9,6 +9,14 @@ const FileResult = struct {
     path: []const u8, // filename; empty when reading from stdin
 };
 
+const Flags = struct {
+    lines: bool = false,
+    words: bool = false,
+    chars: bool = false,
+    bytes: bool = false,
+    len: bool = false,
+};
+
 fn analyze(contents: []const u8, path: []const u8) FileResult {
     // wc -l
     var line_count: usize = 0;
@@ -74,6 +82,44 @@ fn analyze(contents: []const u8, path: []const u8) FileResult {
     };
 }
 
+fn printRow(w: *std.Io.Writer, result: FileResult, width: usize, flags: Flags) !void {
+    // track column printing
+    var printed_column = false;
+
+    if (flags.lines) {
+        if (printed_column) try w.print(" ", .{});
+        try w.print("{d:[1]}", .{ result.lines, width });
+        printed_column = true;
+    }
+
+    if (flags.words) {
+        if (printed_column) try w.print(" ", .{});
+        try w.print("{d:[1]}", .{ result.words, width });
+        printed_column = true;
+    }
+
+    if (flags.chars) {
+        if (printed_column) try w.print(" ", .{});
+        try w.print("{d:[1]}", .{ result.chars, width });
+        printed_column = true;
+    }
+
+    if (flags.bytes) {
+        if (printed_column) try w.print(" ", .{});
+        try w.print("{d:[1]}", .{ result.bytes, width });
+        printed_column = true;
+    }
+
+    if (flags.len) {
+        if (printed_column) try w.print(" ", .{});
+        try w.print("{d:[1]}", .{ result.max_line_len, width });
+        printed_column = true;
+    }
+
+    if (result.path.len > 0) try w.print(" {s}", .{result.path});
+    try w.print("\n", .{});
+}
+
 pub fn main(init: std.process.Init) !void {
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
@@ -89,11 +135,7 @@ pub fn main(init: std.process.Init) !void {
     var total_bytes: usize = 0;
     var total_chars: usize = 0;
     var total_max_line_len: usize = 0;
-    var show_lines: bool = false;
-    var show_words: bool = false;
-    var show_bytes: bool = false;
-    var show_chars: bool = false;
-    var show_len: bool = false;
+    var flags: Flags = .{};
     var any_flag: bool = false;
 
     var filenames: std.ArrayList([]const u8) = .empty;
@@ -101,28 +143,28 @@ pub fn main(init: std.process.Init) !void {
     for (args[1..]) |arg| {
         if (std.mem.eql(u8, arg, "-l")) {
             any_flag = true;
-            show_lines = true;
+            flags.lines = true;
         } else if (std.mem.eql(u8, arg, "-w")) {
             any_flag = true;
-            show_words = true;
+            flags.words = true;
         } else if (std.mem.eql(u8, arg, "-c")) {
             any_flag = true;
-            show_bytes = true;
+            flags.bytes = true;
         } else if (std.mem.eql(u8, arg, "-m")) {
             any_flag = true;
-            show_chars = true;
+            flags.chars = true;
         } else if (std.mem.eql(u8, arg, "-L")) {
             any_flag = true;
-            show_len = true;
+            flags.len = true;
         } else {
             try filenames.append(arena, arg);
         }
     }
 
     if (!any_flag) {
-        show_lines = true;
-        show_words = true;
-        show_bytes = true;
+        flags.lines = true;
+        flags.words = true;
+        flags.bytes = true;
     }
 
     var results: std.ArrayList(FileResult) = .empty;
@@ -187,77 +229,19 @@ pub fn main(init: std.process.Init) !void {
     }
 
     for (results.items) |item| {
-        var printed_column = false;
-
-        if (show_lines) {
-            if (printed_column) try writer.interface.print(" ", .{});
-            try writer.interface.print("{d:[1]}", .{ item.lines, width });
-            printed_column = true;
-        }
-
-        if (show_words) {
-            if (printed_column) try writer.interface.print(" ", .{});
-            try writer.interface.print("{d:[1]}", .{ item.words, width });
-            printed_column = true;
-        }
-
-        if (show_chars) {
-            if (printed_column) try writer.interface.print(" ", .{});
-            try writer.interface.print("{d:[1]}", .{ item.chars, width });
-            printed_column = true;
-        }
-
-        if (show_bytes) {
-            if (printed_column) try writer.interface.print(" ", .{});
-            try writer.interface.print("{d:[1]}", .{ item.bytes, width });
-            printed_column = true;
-        }
-
-        if (show_len) {
-            if (printed_column) try writer.interface.print(" ", .{});
-            try writer.interface.print("{d:[1]}", .{ item.max_line_len, width });
-            printed_column = true;
-        }
-
-        if (item.path.len > 0) try writer.interface.print(" {s}", .{item.path});
-        try writer.interface.print("\n", .{});
+        try printRow(&writer.interface, item, width, flags);
     }
 
     if (filenames.items.len > 1) {
-        // track column printing
-        var printed_column = false;
-
-        if (show_lines) {
-            if (printed_column) try writer.interface.print(" ", .{});
-            try writer.interface.print("{d:[1]}", .{ total_lines, width });
-            printed_column = true;
-        }
-
-        if (show_words) {
-            if (printed_column) try writer.interface.print(" ", .{});
-            try writer.interface.print("{d:[1]}", .{ total_words, width });
-            printed_column = true;
-        }
-
-        if (show_chars) {
-            if (printed_column) try writer.interface.print(" ", .{});
-            try writer.interface.print("{d:[1]}", .{ total_chars, width });
-            printed_column = true;
-        }
-
-        if (show_bytes) {
-            if (printed_column) try writer.interface.print(" ", .{});
-            try writer.interface.print("{d:[1]}", .{ total_bytes, width });
-            printed_column = true;
-        }
-
-        if (show_len) {
-            if (printed_column) try writer.interface.print(" ", .{});
-            try writer.interface.print("{d:[1]}", .{ total_max_line_len, width });
-            printed_column = true;
-        }
-
-        try writer.interface.print(" total\n", .{});
+        const totals = FileResult{
+            .lines = total_lines,
+            .words = total_words,
+            .bytes = total_bytes,
+            .chars = total_chars,
+            .max_line_len = total_max_line_len,
+            .path = "total",
+        };
+        try printRow(&writer.interface, totals, width, flags);
     }
     try writer.interface.flush();
     if (had_error) std.process.exit(1);

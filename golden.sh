@@ -2,6 +2,7 @@
 # golden.sh - differential test harness: bwc vs GNU wc (the oracle)
 
 BWC=./zig-out/bin/bwc
+zig build || exit 1
 
 pass=0
 fail=0

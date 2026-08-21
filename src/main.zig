@@ -24,43 +24,31 @@ const Flags = struct {
 /// Count all five wc metrics of `contents`. Infallible: undecodable
 /// bytes are skipped, not errors (see checklist items 3, 10).
 fn analyze(contents: []const u8, path: []const u8) FileResult {
-    // wc -l
+    // pass 1: byte-wise counters (wc -l, wc -w)
     var line_count: usize = 0;
-
-    // wc -w
     var word_count: usize = 0;
     var in_word: bool = false;
 
-    // wc -L
-    var current_len: usize = 0;
-    var max_len: usize = 0;
-
     for (contents) |byte| {
-        // lines: wc -l
         if (byte == '\n') {
             line_count += 1;
         }
 
-        // words: wc -w
         if (std.ascii.isWhitespace(byte)) {
             in_word = false;
         } else if (!in_word) {
             word_count += 1;
             in_word = true;
         }
-
-        // max line: wc -L
-        if (byte == '\n') {
-            current_len = 0;
-        } else {
-            current_len += 1;
-        }
-        max_len = @max(max_len, current_len);
     }
 
-    // wc -m
+    // pass 2: codepoint-wise counters (wc -m, wc -L)
+    // undecodable bytes are skipped, never counted
     var i: usize = 0;
     var char_count: usize = 0;
+    var current_len: usize = 0;
+    var max_len: usize = 0;
+
     while (i < contents.len) {
         const n = std.unicode.utf8ByteSequenceLength(contents[i]) catch {
             i += 1;
@@ -74,9 +62,19 @@ fn analyze(contents: []const u8, path: []const u8) FileResult {
             i += 1;
             continue; // valid lead, bad continuation ("\xc3\x28")
         };
+
+        if (contents[i] == '\n') {
+            max_len = @max(max_len, current_len);
+            current_len = 0;
+        } else {
+            current_len += 1;
+        }
+
         char_count += 1;
         i += n;
     }
+
+    max_len = @max(max_len, current_len);
 
     return FileResult{
         .path = path,
@@ -288,6 +286,16 @@ test "max line length: just a newline" {
     try std.testing.expectEqual(0, result.max_line_len);
 }
 
+test "max line length: multibyte characters" {
+    const result = analyze("héllo\nbb\n", "");
+    try std.testing.expectEqual(5, result.max_line_len);
+}
+
+test "max line length: invalid bytes don't count" {
+    const result = analyze("\xff\xfe hello", "");
+    try std.testing.expectEqual(6, result.max_line_len);
+}
+
 test "char count: invalid bytes are skipped" {
     const result = analyze("\xff\xfe hello", "");
     try std.testing.expectEqual(6, result.chars);
@@ -319,7 +327,5 @@ test "all counters: multibyte input" {
     try std.testing.expectEqual(2, result.words);
     try std.testing.expectEqual(14, result.bytes);
     try std.testing.expectEqual(12, result.chars);
-    // item 8: -L counts bytes, not display width. wc -L says 11.
-    // This expectation flips to 11 when item 8 is fixed.
-    try std.testing.expectEqual(13, result.max_line_len);
+    try std.testing.expectEqual(11, result.max_line_len);
 }

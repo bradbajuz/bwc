@@ -15,19 +15,18 @@ echo "secret" >testdir/noperm.txt
 chmod 000 testdir/noperm.txt
 
 # --- expected divergences (see CHECKLIST.md) ---
-# item 8: -L counts bytes, wc counts display width
 # item 10: -w counts undecodable bytes as word chars
 # item 11: directory arg -> wc falls back to width 7
+# item 12: -L counts codepoints, not display width (CJK wide chars)
 expected_diffs=(
-    # item 8: -L counts bytes, not display width
-    "file -L utf8test.txt" "file -l -w -c -m -L utf8test.txt" "stdin all: utf8"
-    "file -L bad.bin" "file -l -w -c -m -L bad.bin"
-    "stdin -L: utf8"
     # item 10: -w counts undecodable bytes as word chars
     "file -w bad.bin" "file no-flags bad.bin" "file -l -w bad.bin"
+    "file -l -w -c -m -L bad.bin"
     "stdin -w: bad" "stdin no-flags: bad"
     # item 11: directory arg -> wc width fallback 7
     "error: directory"
+    # item 12: -L counts codepoints, not display width (CJK wide chars)
+    "stdin -L: wide chars"
 )
 
 check() {
@@ -116,6 +115,7 @@ check_stdin "stdin -l: plain" "ab\ncd\n" -l
 check_stdin "stdin no-flags: plain" "ab\ncd\n"
 check_stdin "stdin all: plain" "ab\ncd\n" -l -w -c -m -L
 check_stdin "stdin -L: utf8" "héllo wörld\n" -L
+check_stdin "stdin -L: wide chars" "你好\n" -L
 check_stdin "stdin all: utf8" "héllo wörld\n" -l -w -c -m -L
 check_stdin "stdin -m: bad" "\xff\xfe hello" -m
 check_stdin "stdin -w: bad" "\xff\xfe hello" -w

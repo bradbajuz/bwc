@@ -15,14 +15,9 @@ echo "secret" >testdir/noperm.txt
 chmod 000 testdir/noperm.txt
 
 # --- expected divergences (see CHECKLIST.md) ---
-# item 10: -w counts undecodable bytes as word chars
 # item 11: directory arg -> wc falls back to width 7
 # item 12: -L counts codepoints, not display width (CJK wide chars)
 expected_diffs=(
-    # item 10: -w counts undecodable bytes as word chars
-    "file -w bad.bin" "file no-flags bad.bin" "file -l -w bad.bin"
-    "file -l -w -c -m -L bad.bin"
-    "stdin -w: bad" "stdin no-flags: bad"
     # item 11: directory arg -> wc width fallback 7
     "error: directory"
     # item 12: -L counts codepoints, not display width (CJK wide chars)

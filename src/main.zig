@@ -21,30 +21,34 @@ const Flags = struct {
 
 // ------------------------------ logic ------------------------------
 
+/// Word separators per glibc C.UTF-8 iswspace: ASCII whitespace plus
+/// Unicode category Zs. Notably NOT U+0085 or U+2028/2029 (verified
+/// against GNU wc).
+fn isWordSeparator(cp: u21) bool {
+    if (cp < 0x80) return std.ascii.isWhitespace(@intCast(cp));
+    return switch (cp) {
+        0xA0, 0x1680, 0x2000...0x200A, 0x202F, 0x205F, 0x3000 => true,
+        else => false,
+    };
+}
+
 /// Count all five wc metrics of `contents`. Infallible: undecodable
 /// bytes are skipped, not errors (see checklist items 3, 10).
 fn analyze(contents: []const u8, path: []const u8) FileResult {
-    // pass 1: byte-wise counters (wc -l, wc -w)
+    // pass 1: byte-wise counters (wc -l)
     var line_count: usize = 0;
-    var word_count: usize = 0;
-    var in_word: bool = false;
 
     for (contents) |byte| {
         if (byte == '\n') {
             line_count += 1;
         }
-
-        if (std.ascii.isWhitespace(byte)) {
-            in_word = false;
-        } else if (!in_word) {
-            word_count += 1;
-            in_word = true;
-        }
     }
 
-    // pass 2: codepoint-wise counters (wc -m, wc -L)
+    // pass 2: codepoint-wise counters (wc -w, wc -m, wc -L)
     // undecodable bytes are skipped, never counted
     var i: usize = 0;
+    var word_count: usize = 0;
+    var in_word: bool = false;
     var char_count: usize = 0;
     var current_len: usize = 0;
     var max_len: usize = 0;
@@ -58,10 +62,17 @@ fn analyze(contents: []const u8, path: []const u8) FileResult {
             i += 1;
             continue; // truncated final sequence: skip, don't count
         }
-        _ = std.unicode.utf8Decode(contents[i..][0..n]) catch {
+        const cp = std.unicode.utf8Decode(contents[i..][0..n]) catch {
             i += 1;
             continue; // valid lead, bad continuation ("\xc3\x28")
         };
+
+        if (isWordSeparator(cp)) {
+            in_word = false;
+        } else if (!in_word) {
+            word_count += 1;
+            in_word = true;
+        }
 
         if (contents[i] == '\n') {
             max_len = @max(max_len, current_len);
@@ -319,6 +330,26 @@ test "char count: truncated sequence at end of input" {
 test "char count: empty input" {
     const result = analyze("", "");
     try std.testing.expectEqual(0, result.chars);
+}
+
+test "words: invalid bytes are invisible" {
+    const result = analyze("\xff\xfe hello", "");
+    try std.testing.expectEqual(1, result.words);
+}
+
+test "words: invalid bytes don't split a word" {
+    const result = analyze("ab\xffcd", "");
+    try std.testing.expectEqual(1, result.words);
+}
+
+test "words: non-breaking space separates" {
+    const result = analyze("a\xc2\xa0b", "");
+    try std.testing.expectEqual(2, result.words);
+}
+
+test "words: NEL is not a separator" {
+    const result = analyze("a\xc2\x85b", "");
+    try std.testing.expectEqual(1, result.words);
 }
 
 test "all counters: multibyte input" {

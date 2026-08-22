@@ -35,18 +35,11 @@ fn isWordSeparator(cp: u21) bool {
 /// Count all five wc metrics of `contents`. Infallible: undecodable
 /// bytes are skipped, not errors (see checklist items 3, 10).
 fn analyze(contents: []const u8, path: []const u8) FileResult {
-    // pass 1: byte-wise counters (wc -l)
-    var line_count: usize = 0;
 
-    for (contents) |byte| {
-        if (byte == '\n') {
-            line_count += 1;
-        }
-    }
-
-    // pass 2: codepoint-wise counters (wc -w, wc -m, wc -L)
+    // single pass, one codepoint at a time: wc -l, -w, -m, -L
     // undecodable bytes are skipped, never counted
     var i: usize = 0;
+    var line_count: usize = 0;
     var word_count: usize = 0;
     var in_word: bool = false;
     var char_count: usize = 0;
@@ -74,7 +67,8 @@ fn analyze(contents: []const u8, path: []const u8) FileResult {
             in_word = true;
         }
 
-        if (contents[i] == '\n') {
+        if (cp == '\n') {
+            line_count += 1;
             max_len = @max(max_len, current_len);
             current_len = 0;
         } else {

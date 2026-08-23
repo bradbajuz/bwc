@@ -182,6 +182,7 @@ pub fn main(init: std.process.Init) !void {
     }
 
     var results: std.ArrayList(FileResult) = .empty;
+    var saw_directory = false;
 
     if (filenames.items.len == 0) {
         const file = std.Io.File.stdin();
@@ -206,6 +207,7 @@ pub fn main(init: std.process.Init) !void {
                     error.IsDir => {
                         std.debug.print("bwc: {s}: Is a directory\n", .{filename});
                         try results.append(arena, FileResult{ .lines = 0, .words = 0, .bytes = 0, .chars = 0, .max_line_len = 0, .path = filename });
+                        saw_directory = true;
                     },
                     else => std.debug.print("bwc: {s}: {s}\n", .{ filename, @errorName(err) }),
                 }
@@ -243,6 +245,7 @@ pub fn main(init: std.process.Init) !void {
         if (filenames.items.len == 0) {
             width = @max(width, 7);
         }
+        if (saw_directory) width = @max(width, 7);
     }
 
     for (results.items) |item| {

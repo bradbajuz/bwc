@@ -15,11 +15,8 @@ echo "secret" >testdir/noperm.txt
 chmod 000 testdir/noperm.txt
 
 # --- expected divergences (see CHECKLIST.md) ---
-# item 11: directory arg -> wc falls back to width 7
 # item 12: -L counts codepoints, not display width (CJK wide chars)
 expected_diffs=(
-    # item 11: directory arg -> wc width fallback 7
-    "error: directory"
     # item 12: -L counts codepoints, not display width (CJK wide chars)
     "stdin -L: wide chars"
 )
@@ -103,6 +100,7 @@ check "multi: good + missing" -l testdir/foobar.txt testdir/missing.txt
 check "error: missing file" testdir/missing.txt
 check "error: noperm" testdir/noperm.txt
 check "error: noperm -l" -l testdir/noperm.txt
+check "error: directory -l" "-l" testdir
 check "error: directory" testdir
 
 # --- stdin ---

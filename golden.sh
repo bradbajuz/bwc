@@ -15,67 +15,63 @@ echo "secret" >testdir/noperm.txt
 chmod 000 testdir/noperm.txt
 
 # --- expected divergences (see CHECKLIST.md) ---
-# item 12: -L counts codepoints, not display width (CJK wide chars)
-expected_diffs=(
-    # item 12: -L counts codepoints, not display width (CJK wide chars)
-    "stdin -L: wide chars"
-)
+expected_diffs=()
 
 check() {
-    local label=$1
-    shift # first arg is the name; the REST are passed to both tools
-    local bwc_out wc_out bwc_rc wc_rc
+  local label=$1
+  shift # first arg is the name; the REST are passed to both tools
+  local bwc_out wc_out bwc_rc wc_rc
 
-    bwc_out=$("$BWC" "$@" 2>/dev/null)
-    bwc_rc=$?
-    wc_out=$(wc "$@" 2>/dev/null)
-    wc_rc=$?
+  bwc_out=$("$BWC" "$@" 2>/dev/null)
+  bwc_rc=$?
+  wc_out=$(wc "$@" 2>/dev/null)
+  wc_rc=$?
 
-    verdict "$label" "$bwc_out" "$bwc_rc" "$wc_out" "$wc_rc"
+  verdict "$label" "$bwc_out" "$bwc_rc" "$wc_out" "$wc_rc"
 }
 
 check_stdin() {
-    local label=$1
-    shift
-    local input=$1
-    shift # second arg is the piped input; the REST go to both tools
-    local bwc_out wc_out bwc_rc wc_rc
+  local label=$1
+  shift
+  local input=$1
+  shift # second arg is the piped input; the REST go to both tools
+  local bwc_out wc_out bwc_rc wc_rc
 
-    bwc_out=$(printf "$input" | "$BWC" "$@" 2>/dev/null)
-    bwc_rc=$?
-    wc_out=$(printf "$input" | wc "$@" 2>/dev/null)
-    wc_rc=$?
+  bwc_out=$(printf "$input" | "$BWC" "$@" 2>/dev/null)
+  bwc_rc=$?
+  wc_out=$(printf "$input" | wc "$@" 2>/dev/null)
+  wc_rc=$?
 
-    verdict "$label" "$bwc_out" "$bwc_rc" "$wc_out" "$wc_rc"
+  verdict "$label" "$bwc_out" "$bwc_rc" "$wc_out" "$wc_rc"
 }
 
 verdict() {
-    local label=$1 bwc_out=$2 bwc_rc=$3 wc_out=$4 wc_rc=$5
-    local expected=false
+  local label=$1 bwc_out=$2 bwc_rc=$3 wc_out=$4 wc_rc=$5
+  local expected=false
 
-    if printf '%s\n' "${expected_diffs[@]}" | grep -Fxq "$label"; then
-        expected=true
-    fi
+  if printf '%s\n' "${expected_diffs[@]}" | grep -Fxq "$label"; then
+    expected=true
+  fi
 
-    if [[ $bwc_out == "$wc_out" && $bwc_rc -eq $wc_rc ]]; then
-        if $expected; then
-            echo "XPASS: $label (listed as expected diff, but matched)"
-            xpass=$((xpass + 1))
-        else
-            echo "PASS: $label"
-            pass=$((pass + 1))
-        fi
+  if [[ $bwc_out == "$wc_out" && $bwc_rc -eq $wc_rc ]]; then
+    if $expected; then
+      echo "XPASS: $label (listed as expected diff, but matched)"
+      xpass=$((xpass + 1))
     else
-        if $expected; then
-            echo "XFAIL: $label"
-            xfail=$((xfail + 1))
-        else
-            echo "DIFF: $label"
-            echo " bwc(rc=$bwc_rc): $bwc_out"
-            echo " wc (rc=$wc_rc): $wc_out"
-            fail=$((fail + 1))
-        fi
+      echo "PASS: $label"
+      pass=$((pass + 1))
     fi
+  else
+    if $expected; then
+      echo "XFAIL: $label"
+      xfail=$((xfail + 1))
+    else
+      echo "DIFF: $label"
+      echo " bwc(rc=$bwc_rc): $bwc_out"
+      echo " wc (rc=$wc_rc): $wc_out"
+      fail=$((fail + 1))
+    fi
+  fi
 }
 
 # --- generated matrix: fixtures x flag sets ---
@@ -83,10 +79,10 @@ fixtures=(testdir/dingus.txt testdir/empty.txt testdir/foobar.txt testdir/utf8te
 flagsets=("-l" "-w" "-c" "-m" "-L" "" "-l -w" "-l -w -c -m -L")
 
 for f in "${fixtures[@]}"; do
-    for fl in "${flagsets[@]}"; do
-        # intentional word-splitting: $fl unquoted so "-l -w" becomes two args
-        check "file ${fl:-no-flags} $(basename "$f")" $fl "$f"
-    done
+  for fl in "${flagsets[@]}"; do
+    # intentional word-splitting: $fl unquoted so "-l -w" becomes two args
+    check "file ${fl:-no-flags} $(basename "$f")" $fl "$f"
+  done
 done
 
 # --- multi-file ---
@@ -109,6 +105,7 @@ check_stdin "stdin no-flags: plain" "ab\ncd\n"
 check_stdin "stdin all: plain" "ab\ncd\n" -l -w -c -m -L
 check_stdin "stdin -L: utf8" "héllo wörld\n" -L
 check_stdin "stdin -L: wide chars" "你好\n" -L
+check_stdin "stdin -L: tab stop" "ab\tcd\n" -L
 check_stdin "stdin all: utf8" "héllo wörld\n" -l -w -c -m -L
 check_stdin "stdin -m: bad" "\xff\xfe hello" -m
 check_stdin "stdin -w: bad" "\xff\xfe hello" -w

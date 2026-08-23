@@ -2,6 +2,10 @@ const std = @import("std");
 
 // ------------------------------ types ------------------------------
 
+extern fn wcwidth(wc: c_int) c_int;
+extern fn setlocale(category: c_int, locale: [*:0]const u8) ?[*:0]u8;
+const LC_ALL: c_int = 6; // glibc
+
 const FileResult = struct {
     lines: usize,
     words: usize,
@@ -71,8 +75,11 @@ fn analyze(contents: []const u8, path: []const u8) FileResult {
             line_count += 1;
             max_len = @max(max_len, current_len);
             current_len = 0;
+        } else if (cp == '\t') {
+            current_len += 8 - (current_len % 8);
         } else {
-            current_len += 1;
+            const w = wcwidth(cp);
+            if (w > 0) current_len += @intCast(w);
         }
 
         char_count += 1;
@@ -135,6 +142,7 @@ fn printRow(w: *std.Io.Writer, result: FileResult, width: usize, flags: Flags) !
 /// each file (or stdin when no files are given), print one row per input
 /// plus a total row for multiple files. Exits 1 if any file errored.
 pub fn main(init: std.process.Init) !void {
+    _ = setlocale(LC_ALL, "");
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
     var buf: [4096]u8 = undefined;
@@ -295,6 +303,7 @@ test "max line length: just a newline" {
 }
 
 test "max line length: multibyte characters" {
+    _ = setlocale(LC_ALL, "C.UTF-8");
     const result = analyze("héllo\nbb\n", "");
     try std.testing.expectEqual(5, result.max_line_len);
 }
@@ -302,6 +311,35 @@ test "max line length: multibyte characters" {
 test "max line length: invalid bytes don't count" {
     const result = analyze("\xff\xfe hello", "");
     try std.testing.expectEqual(6, result.max_line_len);
+}
+
+test "max line length: wide chars count double" {
+    // 你 and 又 are East Asian Wide: wcwidth = 2 each
+    // -> 4 columns, not 2 codepoints
+    _ = setlocale(LC_ALL, "C.UTF-8");
+    const result = analyze("你好\n", "");
+    try std.testing.expectEqual(4, result.max_line_len);
+}
+
+test "max line length: tab advances to next stop" {
+    // a,b -> column 2; tab -> 8; c,d -> 10 (oracle: printf 'ab\tcd\n' | wc -L)
+    _ = setlocale(LC_ALL, "C.UTF-8");
+    const result = analyze("ab\tcd\n", "");
+    try std.testing.expectEqual(10, result.max_line_len);
+}
+
+test "max line length: combining marks are zero width" {
+    // e + U+0301 combining acute -> 1 column
+    _ = setlocale(LC_ALL, "C.UTF-8");
+    const result = analyze("e\xcc\x81\n", "");
+    try std.testing.expectEqual(1, result.max_line_len);
+}
+
+test "max line length: control chars are zero width" {
+    // BEL is non-printable: wcwidth = -1 -> adds nothing
+    _ = setlocale(LC_ALL, "C.UTF-8");
+    const result = analyze("a\x07b\n", "");
+    try std.testing.expectEqual(2, result.max_line_len);
 }
 
 test "char count: invalid bytes are skipped" {
@@ -350,6 +388,7 @@ test "words: NEL is not a separator" {
 }
 
 test "all counters: multibyte input" {
+    _ = setlocale(LC_ALL, "C.UTF-8");
     const result = analyze("héllo wörld\n", "");
     try std.testing.expectEqual(1, result.lines);
     try std.testing.expectEqual(2, result.words);

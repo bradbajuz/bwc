@@ -2,3 +2,4 @@
 zig-out/
 testdir/noperm.txt
 .*/
+AGENTS.md

@@ -78,6 +78,13 @@ const Analyzer = struct {
         return i;
     }
 
+    /// Fast path for lines/bytes-only selections: '\n' is a single byte
+    /// and invalid UTF-8 can't affect the count, so no decoding, no carry.
+    fn processLinesOnly(self: *Analyzer, chunk: []const u8) void {
+        self.lines += std.mem.count(u8, chunk, "\n");
+        self.bytes += chunk.len;
+    }
+
     /// Final fold; call once after the last chunk.
     fn result(self: *Analyzer, path: []const u8) FileResult {
         self.max_len = @max(self.max_len, self.current_len);
@@ -105,8 +112,22 @@ fn addToTotal(total: *FileResult, r: FileResult) void {
 
 /// Stream one input through the analyzer in buf-sized chunks,
 /// carrying any incomplete UTF-8 tail across chunk boundaries.
-fn countInput(file: std.Io.File, io: std.Io, buf: []u8, path: []const u8) !FileResult {
+fn countInput(file: std.Io.File, io: std.Io, buf: []u8, path: []const u8, flags: Flags) !FileResult {
     var a: Analyzer = .{};
+
+    if (!flags.words and !flags.chars and !flags.len) {
+        // selection ⊆ {lines, bytes}: byte scan suffices
+        while (true) {
+            const n = file.readStreaming(io, &.{buf}) catch |err| switch (err) {
+                error.EndOfStream => break,
+                else => return err,
+            };
+            a.processLinesOnly(buf[0..n]);
+        }
+        return a.result(path);
+    }
+
+    // full decode path (words/chars/len selected)
     var carry: usize = 0;
     while (true) {
         const n = file.readStreaming(io, &.{buf[carry..]}) catch |err| switch (err) {
@@ -233,7 +254,7 @@ pub fn main(init: std.process.Init) !void {
     var totals: FileResult = .{ .lines = 0, .words = 0, .bytes = 0, .chars = 0, .max_line_len = 0, .path = "total" };
 
     if (filenames.items.len == 0) {
-        const result = try countInput(std.Io.File.stdin(), init.io, &buf, "");
+        const result = try countInput(std.Io.File.stdin(), init.io, &buf, "", flags);
 
         addToTotal(&totals, result);
 
@@ -267,7 +288,7 @@ pub fn main(init: std.process.Init) !void {
                 // non-regular (pipe, device...): fall through and actually read
             }
 
-            const result = try countInput(file, init.io, &buf, filename);
+            const result = try countInput(file, init.io, &buf, filename, flags);
 
             addToTotal(&totals, result);
 
@@ -420,6 +441,14 @@ test "all counters: multibyte input" {
     try std.testing.expectEqual(14, result.bytes);
     try std.testing.expectEqual(12, result.chars);
     try std.testing.expectEqual(11, result.max_line_len);
+}
+
+test "lines only: counts across chunk boundaries" {
+    var a: Analyzer = .{};
+    a.processLinesOnly("ab\ncd");
+    a.processLinesOnly("\nef\n");
+    try std.testing.expectEqual(3, a.lines);
+    try std.testing.expectEqual(9, a.bytes);
 }
 
 test "streaming: chunk boundaries are invisible" {

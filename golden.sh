@@ -76,7 +76,7 @@ verdict() {
 
 # --- generated matrix: fixtures x flag sets ---
 fixtures=(testdir/dingus.txt testdir/empty.txt testdir/foobar.txt testdir/utf8test.txt testdir/bad.bin)
-flagsets=("-l" "-w" "-c" "-m" "-L" "" "-l -w" "-l -w -c -m -L")
+flagsets=("-l" "-w" "-c" "-m" "-L" "" "-l -w" "-l -c" "-l -w -c -m -L")
 
 for f in "${fixtures[@]}"; do
   for fl in "${flagsets[@]}"; do

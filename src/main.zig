@@ -23,7 +23,104 @@ const Flags = struct {
     len: bool = false,
 };
 
+const Analyzer = struct {
+    lines: usize = 0,
+    words: usize = 0,
+    bytes: usize = 0,
+    chars: usize = 0,
+    current_len: usize = 0,
+    max_len: usize = 0,
+    in_word: bool = false,
+
+    /// Process chunk, updating all counters. Returns bytes consumed.
+    /// When is_eof is false, an incomplete UTF-8 sequence at the END of
+    /// chunk is left uncomsumed (caller carries it into the next read).
+    /// When true, it's truncated garbage: skipped byte-at-a-time (item 3).
+    fn process(self: *Analyzer, chunk: []const u8, is_eof: bool) usize {
+        var i: usize = 0;
+        while (i < chunk.len) {
+            const n = std.unicode.utf8ByteSequenceLength(chunk[i]) catch {
+                i += 1;
+                continue; // invalid lead byte: skip, don't count
+            };
+            if (i + n > chunk.len) {
+                if (!is_eof) break; // carry: decide when the next chunk arrives
+                i += 1;
+                continue; // EOF: truncated, skip
+            }
+            const cp = std.unicode.utf8Decode(chunk[i..][0..n]) catch {
+                i += 1;
+                continue; // valid lead, bad continuation ("\xc3\x28")
+            };
+
+            if (isWordSeparator(cp)) {
+                self.in_word = false;
+            } else if (!self.in_word) {
+                self.words += 1;
+                self.in_word = true;
+            }
+
+            if (cp == '\n') {
+                self.lines += 1;
+                self.max_len = @max(self.max_len, self.current_len);
+                self.current_len = 0;
+            } else if (cp == '\t') {
+                self.current_len += 8 - (self.current_len % 8);
+            } else {
+                const w = wcwidth(cp);
+                if (w > 0) self.current_len += @intCast(w);
+            }
+
+            self.chars += 1;
+            i += n;
+        }
+        self.bytes += i; // carried bytes get counted when finally consumed
+        return i;
+    }
+
+    /// Final fold; call once after the last chunk.
+    fn result(self: *Analyzer, path: []const u8) FileResult {
+        self.max_len = @max(self.max_len, self.current_len);
+        return .{
+            .path = path,
+            .lines = self.lines,
+            .words = self.words,
+            .bytes = self.bytes,
+            .chars = self.chars,
+            .max_line_len = self.max_len,
+        };
+    }
+};
+
 // ------------------------------ logic ------------------------------
+
+/// Totals
+fn addToTotal(total: *FileResult, r: FileResult) void {
+    total.lines += r.lines;
+    total.words += r.words;
+    total.bytes += r.bytes;
+    total.chars += r.chars;
+    total.max_line_len = @max(total.max_line_len, r.max_line_len);
+}
+
+/// Stream one input through the analyzer in buf-sized chunks,
+/// carrying any incomplete UTF-8 tail across chunk boundaries.
+fn countInput(file: std.Io.File, io: std.Io, buf: []u8, path: []const u8) !FileResult {
+    var a: Analyzer = .{};
+    var carry: usize = 0;
+    while (true) {
+        const n = file.readStreaming(io, &.{buf[carry..]}) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return err,
+        };
+        const total = carry + n;
+        const used = a.process(buf[0..total], false);
+        carry = total - used;
+        @memmove(buf[0..carry], buf[used..total]);
+    }
+    _ = a.process(buf[0..carry], true); // EOF sementics for any leftover tail
+    return a.result(path);
+}
 
 /// Word separators per glibc C.UTF-8 iswspace: ASCII whitespace plus
 /// Unicode category Zs. Notably NOT U+0085 or U+2028/2029 (verified
@@ -39,63 +136,9 @@ fn isWordSeparator(cp: u21) bool {
 /// Count all five wc metrics of `contents`. Infallible: undecodable
 /// bytes are skipped, not errors (see checklist items 3, 10).
 fn analyze(contents: []const u8, path: []const u8) FileResult {
-
-    // single pass, one codepoint at a time: wc -l, -w, -m, -L
-    // undecodable bytes are skipped, never counted
-    var i: usize = 0;
-    var line_count: usize = 0;
-    var word_count: usize = 0;
-    var in_word: bool = false;
-    var char_count: usize = 0;
-    var current_len: usize = 0;
-    var max_len: usize = 0;
-
-    while (i < contents.len) {
-        const n = std.unicode.utf8ByteSequenceLength(contents[i]) catch {
-            i += 1;
-            continue; // invalid lead byte: skip, don't count
-        };
-        if (i + n > contents.len) {
-            i += 1;
-            continue; // truncated final sequence: skip, don't count
-        }
-        const cp = std.unicode.utf8Decode(contents[i..][0..n]) catch {
-            i += 1;
-            continue; // valid lead, bad continuation ("\xc3\x28")
-        };
-
-        if (isWordSeparator(cp)) {
-            in_word = false;
-        } else if (!in_word) {
-            word_count += 1;
-            in_word = true;
-        }
-
-        if (cp == '\n') {
-            line_count += 1;
-            max_len = @max(max_len, current_len);
-            current_len = 0;
-        } else if (cp == '\t') {
-            current_len += 8 - (current_len % 8);
-        } else {
-            const w = wcwidth(cp);
-            if (w > 0) current_len += @intCast(w);
-        }
-
-        char_count += 1;
-        i += n;
-    }
-
-    max_len = @max(max_len, current_len);
-
-    return FileResult{
-        .path = path,
-        .lines = line_count,
-        .words = word_count,
-        .bytes = contents.len,
-        .chars = char_count,
-        .max_line_len = max_len,
-    };
+    var a: Analyzer = .{};
+    _ = a.process(contents, true);
+    return a.result(path);
 }
 
 /// Print one row of counters, right-aligned to `width`, with the
@@ -152,11 +195,6 @@ pub fn main(init: std.process.Init) !void {
     var writer = std.Io.File.writer(stdout_file, init.io, &out_buf);
 
     var had_error = false;
-    var total_lines: usize = 0;
-    var total_words: usize = 0;
-    var total_bytes: usize = 0;
-    var total_chars: usize = 0;
-    var total_max_line_len: usize = 0;
     var flags: Flags = .{};
     var any_flag: bool = false;
 
@@ -191,19 +229,12 @@ pub fn main(init: std.process.Init) !void {
 
     var results: std.ArrayList(FileResult) = .empty;
     var saw_directory = false;
+    var totals: FileResult = .{ .lines = 0, .words = 0, .bytes = 0, .chars = 0, .max_line_len = 0, .path = "total" };
 
     if (filenames.items.len == 0) {
-        const file = std.Io.File.stdin();
-        var file_reader = std.Io.File.reader(file, init.io, &buf);
-        const contents = try std.Io.Reader.allocRemaining(&file_reader.interface, arena, .unlimited);
+        const result = try countInput(std.Io.File.stdin(), init.io, &buf, "");
 
-        const result = analyze(contents, "");
-
-        total_lines += result.lines;
-        total_words += result.words;
-        total_bytes += result.bytes;
-        total_chars += result.chars;
-        total_max_line_len = @max(result.max_line_len, total_max_line_len);
+        addToTotal(&totals, result);
 
         try results.append(arena, result);
     } else {
@@ -224,16 +255,9 @@ pub fn main(init: std.process.Init) !void {
             };
             defer file.close(init.io);
 
-            var file_reader = std.Io.File.reader(file, init.io, &buf);
-            const contents = try std.Io.Reader.allocRemaining(&file_reader.interface, arena, .unlimited);
+            const result = try countInput(file, init.io, &buf, filename);
 
-            const result = analyze(contents, filename);
-
-            total_lines += result.lines;
-            total_words += result.words;
-            total_bytes += result.bytes;
-            total_chars += result.chars;
-            total_max_line_len = @max(result.max_line_len, total_max_line_len);
+            addToTotal(&totals, result);
 
             try results.append(arena, result);
         }
@@ -245,7 +269,7 @@ pub fn main(init: std.process.Init) !void {
     var width: usize = 1;
     if (selected > 1 or filenames.items.len > 1) {
         // determine width for formatting; total_chars can never be larger than total_bytes
-        var max_val = @max(total_lines, total_words, total_bytes);
+        var max_val = @max(totals.lines, totals.words, totals.bytes);
         while (max_val >= 10) {
             max_val /= 10;
             width += 1;
@@ -261,14 +285,6 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (filenames.items.len > 1) {
-        const totals = FileResult{
-            .lines = total_lines,
-            .words = total_words,
-            .bytes = total_bytes,
-            .chars = total_chars,
-            .max_line_len = total_max_line_len,
-            .path = "total",
-        };
         try printRow(&writer.interface, totals, width, flags);
     }
     try writer.interface.flush();
@@ -395,4 +411,30 @@ test "all counters: multibyte input" {
     try std.testing.expectEqual(14, result.bytes);
     try std.testing.expectEqual(12, result.chars);
     try std.testing.expectEqual(11, result.max_line_len);
+}
+
+test "streaming: chunk boundaries are invisible" {
+    _ = setlocale(LC_ALL, "C.UTF-8");
+    const input = "ab\théllo 😀\n\xffdone";
+    const baseline = analyze(input, "");
+
+    var k: usize = 0;
+    while (k <= input.len) : (k += 1) {
+        var a: Analyzer = .{};
+        const used = a.process(input[0..k], false);
+
+        // carry: unconsumed tail of chunk 1 is prepending to chunk 2 --
+        // the same dance main's read loop will do in step 4
+        var tmp: [64]u8 = undefined;
+        const tail = input[used..k];
+        @memcpy(tmp[0..tail.len], tail);
+        @memcpy(tmp[tail.len..][0 .. input.len - k], input[k..]);
+        _ = a.process(tmp[0 .. tail.len + input.len - k], true);
+
+        const got = a.result("");
+        if (!std.meta.eql(baseline, got)) {
+            std.debug.print("failed at split {d}\n", .{k});
+        }
+        try std.testing.expectEqual(baseline, a.result(""));
+    }
 }

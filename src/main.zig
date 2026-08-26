@@ -227,6 +227,7 @@ pub fn main(init: std.process.Init) !void {
         flags.bytes = true;
     }
 
+    const selected = @as(usize, @intFromBool(flags.lines)) + @intFromBool(flags.words) + @intFromBool(flags.chars) + @intFromBool(flags.bytes) + @intFromBool(flags.len);
     var results: std.ArrayList(FileResult) = .empty;
     var saw_directory = false;
     var totals: FileResult = .{ .lines = 0, .words = 0, .bytes = 0, .chars = 0, .max_line_len = 0, .path = "total" };
@@ -255,6 +256,17 @@ pub fn main(init: std.process.Init) !void {
             };
             defer file.close(init.io);
 
+            if (selected == 1 and flags.bytes) { // lone -c
+                const stat = try file.stat(init.io);
+                if (stat.kind == .file) {
+                    const result = FileResult{ .lines = 0, .words = 0, .bytes = @intCast(stat.size), .chars = 0, .max_line_len = 0, .path = filename };
+                    addToTotal(&totals, result);
+                    try results.append(arena, result);
+                    continue;
+                }
+                // non-regular (pipe, device...): fall through and actually read
+            }
+
             const result = try countInput(file, init.io, &buf, filename);
 
             addToTotal(&totals, result);
@@ -262,9 +274,6 @@ pub fn main(init: std.process.Init) !void {
             try results.append(arena, result);
         }
     }
-
-    const selected = @as(usize, @intFromBool(flags.lines)) + @intFromBool(flags.words) +
-        @intFromBool(flags.chars) + @intFromBool(flags.bytes) + @intFromBool(flags.len);
 
     var width: usize = 1;
     if (selected > 1 or filenames.items.len > 1) {

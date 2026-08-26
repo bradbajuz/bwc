@@ -98,6 +98,8 @@ check "error: noperm" testdir/noperm.txt
 check "error: noperm -l" -l testdir/noperm.txt
 check "error: directory -l" "-l" testdir
 check "error: directory" testdir
+check "error: noperm -c" -c testdir/noperm.txt
+check "error: directory -c" -c testdir
 
 # --- stdin ---
 check_stdin "stdin -l: plain" "ab\ncd\n" -l

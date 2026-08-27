@@ -30,7 +30,7 @@ time_min() {
     "$@" >/dev/null 2>&1
     end=$(date +%s%N)
     elapsed=$(((end - start) / 1000000))
-    [ $elapsed -lt $best ] && best=$elapsed
+    if [ $elapsed -ge 0 ] && [ $elapsed -lt $best ]; then best=$elapsed; fi
     i=$((i + 1))
   done
   echo $best
@@ -42,11 +42,18 @@ bench() {
 
   cat "$file" >/dev/null # warm the page cache
 
-  local wc_ms bwc_ms ratio
+  local wc_ms bwc_ms verdict
   wc_ms=$(time_min wc "$@" "$file")
   bwc_ms=$(time_min "$BWC" "$@" "$file")
-  ratio=$(awk "BEGIN { printf \"%.2f\", $bwc_ms / ($wc_ms == 0 ? 1 : $wc_ms) }")
-  printf '%-28s wc=%6dms  bwc=%6dms  ratio=%sx\n' "$label" "$wc_ms" "$bwc_ms" "$ratio"
+
+  if [ "$wc_ms" -lt 5 ] && [ "$bwc_ms" -lt 5 ]; then
+    verdict="tie (timer floor)"
+  elif [ "$bwc_ms" -le "$wc_ms" ]; then
+    verdict=$(awk "BEGIN { printf \"bwc %.2fx faster\", $wc_ms / ($bwc_ms == 0 ? 1 : $bwc_ms) }")
+  else
+    verdict=$(awk "BEGIN { printf \"wc %.2fx faster\", $bwc_ms / ($wc_ms == 0 ? 1 : $wc_ms) }")
+  fi
+  printf '%-28s wc=%6dms  bwc=%6dms  %s\n' "$label" "$wc_ms" "$bwc_ms" "$verdict"
 }
 
 for f in ascii.txt utf8.txt binary.bin; do

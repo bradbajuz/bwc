@@ -38,7 +38,31 @@ const Analyzer = struct {
     /// When true, it's truncated garbage: skipped byte-at-a-time (item 3).
     fn process(self: *Analyzer, chunk: []const u8, is_eof: bool) usize {
         var i: usize = 0;
+
         while (i < chunk.len) {
+            if (chunk[i] < 0x80) {
+                // ASCII fast path: the byte IS the codepoint
+                const b = chunk[i];
+                if (std.ascii.isWhitespace(b)) {
+                    self.in_word = false;
+                } else if (!self.in_word) {
+                    self.words += 1;
+                    self.in_word = true;
+                }
+                if (b == '\n') {
+                    self.lines += 1;
+                    self.max_len = @max(self.max_len, self.current_len);
+                    self.current_len = 0;
+                } else if (b == '\t') {
+                    self.current_len += 8 - (self.current_len % 8);
+                } else if (b >= 0x20 and b != 0x7f) {
+                    self.current_len += 1;
+                }
+                self.chars += 1;
+                i += 1;
+                continue;
+            }
+
             const n = std.unicode.utf8ByteSequenceLength(chunk[i]) catch {
                 i += 1;
                 continue; // invalid lead byte: skip, don't count

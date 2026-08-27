@@ -31,6 +31,10 @@ const Analyzer = struct {
     current_len: usize = 0,
     max_len: usize = 0,
     in_word: bool = false,
+    // Compute only what's asked: gates for the two expensive
+    // counters. Default true so analyze()/tests see full behavior.
+    want_words: bool = true,
+    want_len: bool = true,
 
     /// Process chunk, updating all counters. Returns bytes consumed.
     /// When is_eof is false, an incomplete UTF-8 sequence at the END of
@@ -43,20 +47,26 @@ const Analyzer = struct {
             if (chunk[i] < 0x80) {
                 // ASCII fast path: the byte IS the codepoint
                 const b = chunk[i];
-                if (std.ascii.isWhitespace(b)) {
-                    self.in_word = false;
-                } else if (!self.in_word) {
-                    self.words += 1;
-                    self.in_word = true;
+                if (self.want_words) {
+                    if (std.ascii.isWhitespace(b)) {
+                        self.in_word = false;
+                    } else if (!self.in_word) {
+                        self.words += 1;
+                        self.in_word = true;
+                    }
                 }
                 if (b == '\n') {
                     self.lines += 1;
-                    self.max_len = @max(self.max_len, self.current_len);
-                    self.current_len = 0;
-                } else if (b == '\t') {
-                    self.current_len += 8 - (self.current_len % 8);
-                } else if (b >= 0x20 and b != 0x7f) {
-                    self.current_len += 1;
+                    if (self.want_len) {
+                        self.max_len = @max(self.max_len, self.current_len);
+                        self.current_len = 0;
+                    }
+                } else if (self.want_len) {
+                    if (b == '\t') {
+                        self.current_len += 8 - (self.current_len % 8);
+                    } else if (b >= 0x20 and b != 0x7f) {
+                        self.current_len += 1;
+                    }
                 }
                 self.chars += 1;
                 i += 1;
@@ -77,20 +87,16 @@ const Analyzer = struct {
                 continue; // valid lead, bad continuation ("\xc3\x28")
             };
 
-            if (isWordSeparator(cp)) {
-                self.in_word = false;
-            } else if (!self.in_word) {
-                self.words += 1;
-                self.in_word = true;
+            if (self.want_words) {
+                if (isWordSeparator(cp)) {
+                    self.in_word = false;
+                } else if (!self.in_word) {
+                    self.words += 1;
+                    self.in_word = true;
+                }
             }
 
-            if (cp == '\n') {
-                self.lines += 1;
-                self.max_len = @max(self.max_len, self.current_len);
-                self.current_len = 0;
-            } else if (cp == '\t') {
-                self.current_len += 8 - (self.current_len % 8);
-            } else {
+            if (self.want_len) {
                 const w = wcwidth(cp);
                 if (w > 0) self.current_len += @intCast(w);
             }
@@ -137,7 +143,7 @@ fn addToTotal(total: *FileResult, r: FileResult) void {
 /// Stream one input through the analyzer in buf-sized chunks,
 /// carrying any incomplete UTF-8 tail across chunk boundaries.
 fn countInput(file: std.Io.File, io: std.Io, buf: []u8, path: []const u8, flags: Flags) !FileResult {
-    var a: Analyzer = .{};
+    var a: Analyzer = .{ .want_words = flags.words, .want_len = flags.len };
 
     if (!flags.words and !flags.chars and !flags.len) {
         // selection ⊆ {lines, bytes}: byte scan suffices

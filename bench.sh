@@ -2,7 +2,8 @@
 # bench.sh — bwc vs GNU wc: wall-clock comparison, min of N runs, warm cache
 #
 # Methodology: warm the page cache once per fixture, then time N runs of
-# each tool and report the MINIMUM (least-noise estimate of true cost).
+# each tool and report the 2ND SMALLEST (min-of-N alone is vulnerable to
+# lone downward clock glitches; see time_min).
 # bwc is built with ReleaseFast — never benchmark a Debug build.
 
 BWC=./zig-out/bin/bwc
@@ -21,19 +22,28 @@ if [ ! -f "$BENCH/ascii.txt" ]; then
   head -c 300M /dev/urandom >"$BENCH/binary.bin"
 fi
 
-# min-of-N wall time in milliseconds
+# 2nd-smallest-of-N wall time in milliseconds. Min-of-N is robust to
+# upward noise but a single downward glitch (e.g. a small wall-clock step
+# from NTP slewing, since date +%s%N is not monotonic) wins the min.
+# Taking the 2nd smallest kills lone downward outliers.
 time_min() {
-  local best=999999999 start end elapsed i
+  local times=() start end elapsed i
   i=0
   while [ $i -lt $N ]; do
     start=$(date +%s%N)
     "$@" >/dev/null 2>&1
     end=$(date +%s%N)
     elapsed=$(((end - start) / 1000000))
-    if [ $elapsed -ge 0 ] && [ $elapsed -lt $best ]; then best=$elapsed; fi
+    if [ $elapsed -ge 0 ]; then times+=("$elapsed"); fi
     i=$((i + 1))
   done
-  echo $best
+  local sorted
+  mapfile -t sorted < <(printf '%s\n' "${times[@]}" | sort -n)
+  if [ ${#sorted[@]} -ge 2 ]; then
+    echo "${sorted[1]}"
+  else
+    echo "${sorted[0]}"
+  fi
 }
 
 bench() {

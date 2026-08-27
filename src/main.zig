@@ -209,7 +209,7 @@ pub fn main(init: std.process.Init) !void {
     _ = setlocale(LC_ALL, "");
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
-    var buf: [4096]u8 = undefined;
+    var buf: [128 * 1024]u8 = undefined;
 
     var out_buf: [4096]u8 = undefined;
     const stdout_file = std.Io.File.stdout();

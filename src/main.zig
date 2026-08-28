@@ -2,6 +2,8 @@ const std = @import("std");
 
 // ------------------------------ types ------------------------------
 
+// libc (requires .link_libc in build.zig): wcwidth is the -L display-width
+// oracle; setlocale(LC_ALL, "") in main activates the user's locale for it.
 extern fn wcwidth(wc: c_int) c_int;
 extern fn setlocale(category: c_int, locale: [*:0]const u8) ?[*:0]u8;
 const LC_ALL: c_int = 6; // glibc
@@ -36,9 +38,9 @@ const Analyzer = struct {
     want_words: bool = true,
     want_len: bool = true,
 
-    /// Process chunk, updating all counters. Returns bytes consumed.
+    /// Process chunk, updating the counters enabled by want_*.
     /// When is_eof is false, an incomplete UTF-8 sequence at the END of
-    /// chunk is left uncomsumed (caller carries it into the next read).
+    /// chunk is left unconsumed (caller carries it into the next read).
     /// When true, it's truncated garbage: skipped byte-at-a-time (item 3).
     fn process(self: *Analyzer, chunk: []const u8, is_eof: bool) usize {
         var i: usize = 0;
@@ -131,7 +133,9 @@ const Analyzer = struct {
 
 // ------------------------------ logic ------------------------------
 
-/// Totals
+/// Accumulate one input's counters into the totals row. Everything sums
+/// except max_line_len, which takes the max: the total's longest line is
+/// the longest line of any single input.
 fn addToTotal(total: *FileResult, r: FileResult) void {
     total.lines += r.lines;
     total.words += r.words;
@@ -169,7 +173,7 @@ fn countInput(file: std.Io.File, io: std.Io, buf: []u8, path: []const u8, flags:
         carry = total - used;
         @memmove(buf[0..carry], buf[used..total]);
     }
-    _ = a.process(buf[0..carry], true); // EOF sementics for any leftover tail
+    _ = a.process(buf[0..carry], true); // EOF semantics for any leftover tail
     return a.result(path);
 }
 
@@ -195,7 +199,7 @@ fn analyze(contents: []const u8, path: []const u8) FileResult {
 /// Print one row of counters, right-aligned to `width`, with the
 /// path label when present ("total" is just another path).
 fn printRow(w: *std.Io.Writer, result: FileResult, width: usize, flags: Flags) !void {
-    // track column printing
+    // space goes between columns, not before the first
     var printed_column = false;
 
     if (flags.lines) {
@@ -236,7 +240,9 @@ fn printRow(w: *std.Io.Writer, result: FileResult, width: usize, flags: Flags) !
 /// each file (or stdin when no files are given), print one row per input
 /// plus a total row for multiple files. Exits 1 if any file errored.
 pub fn main(init: std.process.Init) !void {
+    // wcwidth is locale-dependent; without this, C locale treats non-ASCII as non-printable (item 12)
     _ = setlocale(LC_ALL, "");
+
     const arena = init.arena.allocator();
     const args = try init.minimal.args.toSlice(arena);
     var buf: [128 * 1024]u8 = undefined;
@@ -328,7 +334,9 @@ pub fn main(init: std.process.Init) !void {
 
     var width: usize = 1;
     if (selected > 1 or filenames.items.len > 1) {
-        // determine width for formatting; total_chars can never be larger than total_bytes
+        // width = digits of the largest byte count (lines/words/chars can never
+        // exceed bytes). max_line_len CAN exceed bytes (tabs) but GNU ignores it
+        // for width too -- probe: 20-tab file, 160-col line, -l -L pads to 2.
         var max_val = @max(totals.lines, totals.words, totals.bytes);
         while (max_val >= 10) {
             max_val /= 10;
@@ -491,8 +499,8 @@ test "streaming: chunk boundaries are invisible" {
         var a: Analyzer = .{};
         const used = a.process(input[0..k], false);
 
-        // carry: unconsumed tail of chunk 1 is prepending to chunk 2 --
-        // the same dance main's read loop will do in step 4
+        // carry: chunk 1's unconsumed tail is prepended to chunk 2 --
+        // the same carry the read loop in countInput performs
         var tmp: [64]u8 = undefined;
         const tail = input[used..k];
         @memcpy(tmp[0..tail.len], tail);

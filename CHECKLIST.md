@@ -2,82 +2,84 @@
 
 Working through these in order. For each: I attempt the fix, then get it reviewed.
 
-1. [x] Dead `@max` in the max-line loop (`src/main.zig:38-46`) — boundary-update pattern
-2. [x] `defer` in the file loop "fd leak" (`src/main.zig:143`) — INVESTIGATED: not a bug. Zig `defer` is block-scoped
-   and a loop body is a block, so the close fires per iteration. Proven experimentally: 100 files under `ulimit -n 64`,
-   no errors. (Claim originated from Go's function-scoped defer; doesn't apply to Zig.)
-3. [x] Invalid UTF-8 crashed `-m` — fixed: count decodable codepoints, skip undecodable bytes (matches GNU `wc -m`,
-   verified against oracle). Bonus: `analyze` no longer fallible, error union removed.
-4. [x] Golden-test harness — `golden.sh`: differential vs GNU wc (oracle). 62 cases: fixtures×flagsets matrix,
-   multi-file, error paths, stdin. PASS/DIFF/XFAIL/XPASS verdicts; `expected_diffs` (currently empty — all catalogued
-   divergences, items 8–12, resolved). XPASS is a failure (stale entry signal). Exit 0 only when fail=0 and xpass=0.
-   Found items 10 & 11 during construction.
-5. [x] Fused the three byte-wise counting passes (lines/words/max-line) into one loop in `analyze`; char loop stays
-   separate (variable-width, skip-on-error). Verified as pure refactor: 11/11 unit tests + golden.sh 38/21 unchanged.
-6. [x] De-duplicated the print blocks — extracted `printRow(*std.Io.Writer, FileResult, width, Flags)`; totals row is
-   just a `FileResult` with `.path = "total"`. Five loose `show_*` bools became a `Flags` struct. Print section: 73
-   lines → 15. (Process lesson: harness tests the _binary_ — `zig build || exit 1` added to golden.sh after a
-   stale-build false alarm; also found `$(...)` strips trailing newlines, masking missing-\n bugs on single-row output.)
-7. [x] Streaming architecture — 7a DONE: `analyze` split into an `Analyzer` state machine
-   (`process(chunk, is_eof) -> bytes consumed` + `result()` final fold); caller carries incomplete UTF-8 tails (≤3
-   bytes) across chunks via `@memmove` to buffer front; truncated-at-chunk-end ≠ truncated-at-EOF (the trap — defer
-   judgment until next read). `analyze` kept as single-chunk EOF wrapper so all 21 unit tests exercise the machine;
-   killer test = split-point sweep over every boundary of a mixed input. `countInput` helper collapsed main's stdin/file
-   branches; totals became a single `FileResult` + `addToTotal` (scoping bug en route: accumulator declared inside the
-   loop = last-file-only). 2 GB file RSS: 2,103,692 KB → 6,844 KB. 7b-i DONE: lone `-c` on a regular file takes the
-   fstat shortcut — `file.stat()` after `openFile` (open-first proven by probe: GNU still errors on noperm files under
-   `-c`), `stat.kind == .file` gates it, pipes fall through to the read loop; `selected` computation moved above the
-   loop; golden gained `error: noperm -c` / `error: directory -c`. User time for `-c` on 2 GB: 41.91 s → 0.00 s, 0 bytes
-   read. 7b-ii DONE: `processLinesOnly` byte-scan path (`std.mem.count(chunk, "\n")` + `bytes += chunk.len`), dispatched
-   in `countInput` when selection ⊆ {lines, bytes}; no decode, no carry, covers stdin lone `-c`. Golden gained the
-   `-l -c` flagset (69 cases). Lesson: Debug builds don't vectorize — `bwc -l` on 2 GB: 41.7 s (Debug) → 0.02 s
-   (ReleaseFast), matching GNU exactly. Never benchmark a Debug build.
-8. [x] `-L` counts codepoints per line, not bytes — FIXED: max-line tracking moved from the fused byte loop into the
-   UTF-8 while loop (success path counts, skip paths don't; fold at `\n` + final fold after loop). Characterization test
-   flipped 13→11 as designed; added unit tests for multibyte and invalid-byte line lengths. 5 XPASSed entries removed
-   from golden.sh; the bad.bin all-flags row relocated to item 10 (still diverges on words). Residual: item 12 (CJK
-   display width).
-9. [x] Column-padding rule — FIXED. Final GNU rule (corrected during fix): ONE input AND one counter → width 1;
-   otherwise digits of largest total, min 7 for stdin. Fix: `selected` flag-count guards the width computation in
-   `main`. Harness lifecycle executed: 9 XFAILs → XPASS → entries removed. (My earlier "one counter → never pad" was
-   wrong: multi-file single-counter DOES pad.)
-10. [x] `-w` undecodable bytes — FIXED. Word counting moved to the codepoint pass; invalid bytes are _invisible_ (not
-    separators — proven: `ab\xffcd` → 1 word). Separators = ASCII whitespace + Unicode category Zs via `isWordSeparator`
-    (oracle-verified: NEL and U+2028/2029 are NOT separators despite being in Unicode White_Space). 4 new unit tests; 6
-    expected_diffs entries removed.
-11. [x] Directory as argument — FIXED. Refined rule (probe-driven): a non-regular-file arg poisons width to 7 for ALL
-    rows incl. total, but ONLY when width computation runs (multi-flag or multi-file); `wc -l testdir`
-    single-flag/single-arg stays width 1 on both sides. Fix: `saw_directory` flag set in the `error.IsDir` branch,
-    `width = @max(width, 7)` floor inside the width guard. New permanent golden case `error: directory -l` pins the
-    narrow edge; `error: directory` entry removed.
-12. [x] `-L` display width — FIXED via libc. `wc -L` is `wcwidth()` semantics, not codepoints: wide (CJK/emoji) = 2,
-    combining = 0, control = 0, tab = advance to next multiple of 8 (position-dependent), invalid bytes = 0 (skip paths
-    already free). Chose linking libc + calling the real `wcwidth` (oracle-identical by construction) over vendoring
-    Unicode tables. Two traps surfaced: `setlocale(LC_ALL, "")` required in `main` (C locale treats é as non-printable),
-    and tests need `-lc` plus their own `setlocale(LC_ALL, "C.UTF-8")` (process-global state leaked between tests —
-    hidden-ordering landmine). 4 new width tests; last `expected_diffs` entry removed; harness fully green for the first
-    time (62/62).
-13. [x] ASCII fast path in the decode loop — DONE. Byte < 0x80 handled inline at the top of `process` (separators via
-    `std.ascii.isWhitespace`, width 1 for 0x20–0x7E, 0 for other control, `\n`/`\t` as before); skips utf8 decode + libc
-    wcwidth per byte. Verified 23/23 + 69/69 before trusting the bench. Result: bwc beats GNU wc on EVERY measurable
-    row — ascii 1.2–1.4×, utf8 up to 2.06×, binary up to 2.53×, `-l` everywhere ~1.4×. (Process notes: first bench run
-    showed a negative time — `date +%s%N` is wall clock, not monotonic; negative samples now discarded in `time_min`.
-    Verdict column added: `bwc N.NNx faster` / `wc ...` / `tie (timer floor)` below 5 ms.)
-14. [x] Flag-gated work in the decode path — DONE (shape A: runtime fields). `want_words`/`want_len` bools on
-    `Analyzer`, set once at construction in `countInput` from `flags`, default `true` so `analyze()`/tests exercise the
-    full machine untouched. Trap avoided: `lines += 1` must escape the `want_len` guard (the `\n` fold does double
-    duty). Bonus discovery: the codepoint path's `cp == '\n'` / `cp == '\t'` branches were dead since item 13 (cp >=
-    0x80 there; overlongs rejected) — removed, proven by harness. Width-safety argument: `words <= bytes` always and
-    bytes is always counted, so gating `totals.words` to 0 can't shrink the width `max()`. Verified 23/23 + 69/69, then
-    bench (bwc before→after): utf8 -m 538→375 ms, -w 532→406, -L 540→505 (smallest — only the word block removed), (all)
-    flat as predicted. Final: bwc beats GNU on every measurable row, up to 3.4×. Process: a wc control row swung 3×
-    between runs because min-of-N amplifies lone _downward_ clock glitches (`date +%s%N` is wall, not monotonic; the
-    negative-discard guard only catches big steps) — bench.sh now reports the 2nd-smallest sample; when the control
-    moves, suspect the environment, not the treatment.
-15. [ ] Combined short flags — `bwc -lL file` treats `-lL` as a filename; GNU bundles short flags (`-lL` = `-l -L`).
-    Found accidentally during the tab-width probe. Long flags (`--lines` etc.) are the same gap. Parser work in `main`'s
-    arg loop; golden.sh gains combined-flag cases.
-
+- [x] **1.** Dead `@max` in the max-line loop (`src/main.zig:38-46`) — boundary-update pattern
+- [x] **2.** `defer` in the file loop "fd leak" (`src/main.zig:143`) — INVESTIGATED: not a bug. Zig `defer` is
+  block-scoped and a loop body is a block, so the close fires per iteration. Proven experimentally: 100 files under
+  `ulimit -n 64`, no errors. (Claim originated from Go's function-scoped defer; doesn't apply to Zig.)
+- [x] **3.** Invalid UTF-8 crashed `-m` — fixed: count decodable codepoints, skip undecodable bytes (matches GNU
+  `wc -m`, verified against oracle). Bonus: `analyze` no longer fallible, error union removed.
+- [x] **4.** Golden-test harness — `golden.sh`: differential vs GNU wc (oracle). 62 cases: fixtures×flagsets matrix,
+  multi-file, error paths, stdin. PASS/DIFF/XFAIL/XPASS verdicts; `expected_diffs` (currently empty — all catalogued
+  divergences, items 8–12, resolved). XPASS is a failure (stale entry signal). Exit 0 only when fail=0 and xpass=0.
+  Found items 10 & 11 during construction.
+- [x] **5.** Fused the three byte-wise counting passes (lines/words/max-line) into one loop in `analyze`; char loop
+  stays separate (variable-width, skip-on-error). Verified as pure refactor: 11/11 unit tests + golden.sh 38/21
+  unchanged.
+- [x] **6.** De-duplicated the print blocks — extracted `printRow(*std.Io.Writer, FileResult, width, Flags)`; totals row
+  is just a `FileResult` with `.path = "total"`. Five loose `show_*` bools became a `Flags` struct. Print section: 73
+  lines → 15. (Process lesson: harness tests the _binary_ — `zig build || exit 1` added to golden.sh after a stale-build
+  false alarm; also found `$(...)` strips trailing newlines, masking missing-\n bugs on single-row output.)
+- [x] **7.** Streaming architecture — 7a DONE: `analyze` split into an `Analyzer` state machine
+  (`process(chunk, is_eof) -> bytes consumed` + `result()` final fold); caller carries incomplete UTF-8 tails (≤3 bytes)
+  across chunks via `@memmove` to buffer front; truncated-at-chunk-end ≠ truncated-at-EOF (the trap — defer judgment
+  until next read). `analyze` kept as single-chunk EOF wrapper so all 21 unit tests exercise the machine; killer test =
+  split-point sweep over every boundary of a mixed input. `countInput` helper collapsed main's stdin/file branches;
+  totals became a single `FileResult` + `addToTotal` (scoping bug en route: accumulator declared inside the loop =
+  last-file-only). 2 GB file RSS: 2,103,692 KB → 6,844 KB. 7b-i DONE: lone `-c` on a regular file takes the fstat
+  shortcut — `file.stat()` after `openFile` (open-first proven by probe: GNU still errors on noperm files under
+  `-c`), `stat.kind == .file` gates it, pipes fall through to the read loop; `selected` computation moved above the
+  loop; golden gained `error: noperm -c` / `error: directory -c`. User time for `-c` on 2 GB: 41.91 s → 0.00 s, 0 bytes
+  read. 7b-ii DONE: `processLinesOnly` byte-scan path (`std.mem.count(chunk, "\n")` + `bytes += chunk.len`), dispatched
+  in `countInput` when selection ⊆ {lines, bytes}; no decode, no carry, covers stdin lone `-c`. Golden gained the
+  `-l -c` flagset (69 cases). Lesson: Debug builds don't vectorize — `bwc -l` on 2 GB: 41.7 s (Debug) → 0.02 s
+  (ReleaseFast), matching GNU exactly. Never benchmark a Debug build.
+- [x] **8.** `-L` counts codepoints per line, not bytes — FIXED: max-line tracking moved from the fused byte loop into
+  the UTF-8 while loop (success path counts, skip paths don't; fold at `\n` + final fold after loop). Characterization
+  test flipped 13→11 as designed; added unit tests for multibyte and invalid-byte line lengths. 5 XPASSed entries
+  removed from golden.sh; the bad.bin all-flags row relocated to item 10 (still diverges on words). Residual: item 12
+  (CJK display width).
+- [x] **9.** Column-padding rule — FIXED. Final GNU rule (corrected during fix): ONE input AND one counter → width 1;
+  otherwise digits of largest total, min 7 for stdin. Fix: `selected` flag-count guards the width computation in
+  `main`. Harness lifecycle executed: 9 XFAILs → XPASS → entries removed. (My earlier "one counter → never pad" was
+  wrong: multi-file single-counter DOES pad.)
+- [x] **10.** `-w` undecodable bytes — FIXED. Word counting moved to the codepoint pass; invalid bytes are _invisible_
+  (not separators — proven: `ab\xffcd` → 1 word). Separators = ASCII whitespace + Unicode category Zs via
+  `isWordSeparator`
+  (oracle-verified: NEL and U+2028/2029 are NOT separators despite being in Unicode White_Space). 4 new unit tests; 6
+  expected_diffs entries removed.
+- [x] **11.** Directory as argument — FIXED. Refined rule (probe-driven): a non-regular-file arg poisons width to 7 for
+  ALL rows incl. total, but ONLY when width computation runs (multi-flag or multi-file); `wc -l testdir`
+  single-flag/single-arg stays width 1 on both sides. Fix: `saw_directory` flag set in the `error.IsDir` branch,
+  `width = @max(width, 7)` floor inside the width guard. New permanent golden case `error: directory -l` pins the narrow
+  edge; `error: directory` entry removed.
+- [x] **12.** `-L` display width — FIXED via libc. `wc -L` is `wcwidth()` semantics, not codepoints: wide (CJK/emoji) =
+  2, combining = 0, control = 0, tab = advance to next multiple of 8 (position-dependent), invalid bytes = 0 (skip paths
+  already free). Chose linking libc + calling the real `wcwidth` (oracle-identical by construction) over vendoring
+  Unicode tables. Two traps surfaced: `setlocale(LC_ALL, "")` required in `main` (C locale treats é as non-printable),
+  and tests need `-lc` plus their own `setlocale(LC_ALL, "C.UTF-8")` (process-global state leaked between tests —
+  hidden-ordering landmine). 4 new width tests; last `expected_diffs` entry removed; harness fully green for the first
+  time (62/62).
+- [x] **13.** ASCII fast path in the decode loop — DONE. Byte < 0x80 handled inline at the top of `process` (separators
+  via
+  `std.ascii.isWhitespace`, width 1 for 0x20–0x7E, 0 for other control, `\n`/`\t` as before); skips utf8 decode + libc
+  wcwidth per byte. Verified 23/23 + 69/69 before trusting the bench. Result: bwc beats GNU wc on EVERY measurable row —
+  ascii 1.2–1.4×, utf8 up to 2.06×, binary up to 2.53×, `-l` everywhere ~1.4×. (Process notes: first bench run showed a
+  negative time — `date +%s%N` is wall clock, not monotonic; negative samples now discarded in `time_min`. Verdict
+  column added: `bwc N.NNx faster` / `wc ...` / `tie (timer floor)` below 5 ms.)
+- [x] **14.** Flag-gated work in the decode path — DONE (shape A: runtime fields). `want_words`/`want_len` bools on
+  `Analyzer`, set once at construction in `countInput` from `flags`, default `true` so `analyze()`/tests exercise the
+  full machine untouched. Trap avoided: `lines += 1` must escape the `want_len` guard (the `\n` fold does double duty).
+  Bonus discovery: the codepoint path's `cp == '\n'` / `cp == '\t'` branches were dead since item 13 (cp >= 0x80 there;
+  overlongs rejected) — removed, proven by harness. Width-safety argument: `words <= bytes` always and bytes is always
+  counted, so gating `totals.words` to 0 can't shrink the width `max()`. Verified 23/23 + 69/69, then bench (bwc
+  before→after): utf8 -m 538→375 ms, -w 532→406, -L 540→505 (smallest — only the word block removed), (all)
+  flat as predicted. Final: bwc beats GNU on every measurable row, up to 3.4×. Process: a wc control row swung 3×
+  between runs because min-of-N amplifies lone _downward_ clock glitches (`date +%s%N` is wall, not monotonic; the
+  negative-discard guard only catches big steps) — bench.sh now reports the 2nd-smallest sample; when the control moves,
+  suspect the environment, not the treatment.
+- [ ] **15.** Combined short flags — `bwc -lL file` treats `-lL` as a filename; GNU bundles short flags (`-lL` =
+  `-l -L`). Found accidentally during the tab-width probe. Long flags (`--lines` etc.) are the same gap. Parser work in
+  `main`'s arg loop; golden.sh gains combined-flag cases.
 - [x] ~~width: does `max_line_len` belong in the width `max()`?~~ — PROBED, not a bug. 20-tab file (20 bytes, 160-col
   line) under `-l -L`: GNU pads to 2, bwc pads to 2. GNU's width is byte-size-based and ignores `max_line_len`; comment
   at the width computation records the probe.

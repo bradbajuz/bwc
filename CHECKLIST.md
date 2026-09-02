@@ -80,6 +80,13 @@ Working through these in order. For each: I attempt the fix, then get it reviewe
 - [x] **15.** Combined short flags — `bwc -lL file` treats `-lL` as a filename; GNU bundles short flags (`-lL` =
       `-l -L`). Found accidentally during the tab-width probe. Long flags (`--lines` etc.) are the same gap. Parser work in
       `main`'s arg loop; golden.sh gains combined-flag cases.
+- [ ] **16.** ascii `-L` loses to GNU (wc 1.04–1.06× faster; `ascii (all)` barely ties). Diagnosis:
+      GNU's `-L` is free on top of its decode (wc -m ≈ wc -L: 548 vs 544 ms), while bwc's ASCII fast path
+      (`src/main.zig:60-72`) pays ~40% over `-m` (409 → 567 ms) for the per-byte `\n` fold, tab branch, and range check on a
+      serial `current_len` accumulator. Plan: vectorized `indexOfScalar` for `\n`; bulk-add `current_len += distance` when
+      the line has no tabs, control chars, or bytes ≥ 0x80 (one SIMD-ish scan for those); per-byte loop only for dirty
+      lines. On 100%-clean ascii.txt this should approach `-l` speeds. Watch the `\t` path — position-dependent tab stops
+      are exactly what the dirty-line fallback must preserve.
 - [x] ~~width: does `max_line_len` belong in the width `max()`?~~ — PROBED, not a bug. 20-tab file (20 bytes, 160-col
       line) under `-l -L`: GNU pads to 2, bwc pads to 2. GNU's width is byte-size-based and ignores `max_line_len`; comment
       at the width computation records the probe.

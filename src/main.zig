@@ -257,22 +257,59 @@ pub fn main(init: std.process.Init) !void {
 
     var filenames: std.ArrayList([]const u8) = .empty;
 
+    // GNU conventions not implemented: bare "-" (GNU: read stdin) falls through
+    // as a filename; bare "--" (GNU: end of options) dies as invalid option '-'.
     for (args[1..]) |arg| {
-        if (std.mem.eql(u8, arg, "-l")) {
-            any_flag = true;
-            flags.lines = true;
-        } else if (std.mem.eql(u8, arg, "-w")) {
-            any_flag = true;
-            flags.words = true;
-        } else if (std.mem.eql(u8, arg, "-c")) {
-            any_flag = true;
-            flags.bytes = true;
-        } else if (std.mem.eql(u8, arg, "-m")) {
-            any_flag = true;
-            flags.chars = true;
-        } else if (std.mem.eql(u8, arg, "-L")) {
-            any_flag = true;
-            flags.len = true;
+        if (arg.len > 2 and std.mem.startsWith(u8, arg, "--")) {
+            if (std.mem.eql(u8, arg, "--lines")) {
+                any_flag = true;
+                flags.lines = true;
+            } else if (std.mem.eql(u8, arg, "--words")) {
+                any_flag = true;
+                flags.words = true;
+            } else if (std.mem.eql(u8, arg, "--bytes")) {
+                any_flag = true;
+                flags.bytes = true;
+            } else if (std.mem.eql(u8, arg, "--chars")) {
+                any_flag = true;
+                flags.chars = true;
+            } else if (std.mem.eql(u8, arg, "--max-line-length")) {
+                any_flag = true;
+                flags.len = true;
+            } else {
+                std.debug.print("bwc: unrecognized option '{s}'\n", .{arg});
+                std.process.exit(1);
+            }
+        } else if (arg.len > 1 and arg[0] == '-') {
+            // short-flag bundle: each char after the dash is a flag letter
+            for (arg[1..]) |c| {
+                switch (c) {
+                    'l' => {
+                        any_flag = true;
+                        flags.lines = true;
+                    },
+                    'w' => {
+                        any_flag = true;
+                        flags.words = true;
+                    },
+                    'c' => {
+                        any_flag = true;
+                        flags.bytes = true;
+                    },
+                    'm' => {
+                        any_flag = true;
+                        flags.chars = true;
+                    },
+                    'L' => {
+                        any_flag = true;
+                        flags.len = true;
+                    },
+                    else => {
+                        std.debug.print("bwc: invalid option -- '{c}'\n", .{c});
+                        std.process.exit(1);
+                    },
+                }
+            }
         } else {
             try filenames.append(arena, arg);
         }

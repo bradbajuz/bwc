@@ -77,7 +77,7 @@ Working through these in order. For each: I attempt the fix, then get it reviewe
       between runs because min-of-N amplifies lone _downward_ clock glitches (`date +%s%N` is wall, not monotonic; the
       negative-discard guard only catches big steps) — bench.sh now reports the 2nd-smallest sample; when the control moves,
       suspect the environment, not the treatment.
-- [ ] **15.** Combined short flags — `bwc -lL file` treats `-lL` as a filename; GNU bundles short flags (`-lL` =
+- [x] **15.** Combined short flags — `bwc -lL file` treats `-lL` as a filename; GNU bundles short flags (`-lL` =
       `-l -L`). Found accidentally during the tab-width probe. Long flags (`--lines` etc.) are the same gap. Parser work in
       `main`'s arg loop; golden.sh gains combined-flag cases.
 - [x] ~~width: does `max_line_len` belong in the width `max()`?~~ — PROBED, not a bug. 20-tab file (20 bytes, 160-col

@@ -115,6 +115,17 @@ check_stdin "stdin no-flags: bad" "\xff\xfe hello"
 check_stdin "stdin -l: empty" "" -l
 check_stdin "stdin no-flags: empty" ""
 
+# --- combined and long flags (item 15) ---
+check "combined: -lL" -lL testdir/foobar.txt
+check "combined: -lwc" -lwc testdir/utf8test.txt
+check "combined: -mL utf8" -mL testdir/utf8test.txt
+check "combined: multi-file" -lw testdir/foobar.txt testdir/dingus.txt
+check "long: --lines" --lines testdir/foobar.txt
+check "long: --max-line-length" --max-line-length testdir/foobar.txt
+check "long: --bytes --chars" --bytes --chars testdir/utf8test.txt
+check "error: unknown short" -x testdir/foobar.txt
+check "error: unknown long" --bogus testdir/foobar.txt
+
 # --- summary ---
 echo "---"
 echo "pass=$pass fail=$fail xfail=$xfail xpass=$xpass"
